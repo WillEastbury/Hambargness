@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "0Mr5v1VvN6A=",
+  "success": true,
+  "projectFilePath": "/root/Hambargness/Hambargness/Hambargness.csproj",
+  "expectedPackageFiles": [
+    "/root/.nuget/packages/microsoft.aspnetcore.openapi/9.0.13/microsoft.aspnetcore.openapi.9.0.13.nupkg.sha512",
+    "/root/.nuget/packages/microsoft.openapi/1.6.17/microsoft.openapi.1.6.17.nupkg.sha512"
+  ],
+  "logs": []
+}
