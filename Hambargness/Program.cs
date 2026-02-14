@@ -1,6 +1,44 @@
 var builder = WebApplication.CreateBuilder(args);
 var app = builder.Build();
 
+// Image sources to proxy (avoids CORS issues)
+var imageUrls = new Dictionary<string, string>
+{
+    ["satya"] = "https://pbs.twimg.com/profile_images/1221837516816306177/_Ld4un5A_400x400.jpg",
+    ["gates"] = "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a8/Bill_Gates_2017_%28cropped%29.jpg/440px-Bill_Gates_2017_%28cropped%29.jpg",
+    ["bezos"] = "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6d/Jeff_Bezos_at_Amazon_Spheres_Grand_Opening_in_Seattle_-_2018_%2839074799225%29_%28cropped%29.jpg/440px-Jeff_Bezos_at_Amazon_Spheres_Grand_Opening_in_Seattle_-_2018_%2839074799225%29_%28cropped%29.jpg"
+};
+
+var httpClient = new HttpClient();
+httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; Hambargness/1.0)");
+
+// Cache downloaded images in memory
+var imageCache = new Dictionary<string, (byte[] Data, string ContentType)>();
+
+app.MapGet("/img/{name}", async (string name) =>
+{
+    if (!imageUrls.ContainsKey(name)) return Results.NotFound();
+
+    if (!imageCache.ContainsKey(name))
+    {
+        try
+        {
+            var response = await httpClient.GetAsync(imageUrls[name]);
+            response.EnsureSuccessStatusCode();
+            var data = await response.Content.ReadAsByteArrayAsync();
+            var ct = response.Content.Headers.ContentType?.ToString() ?? "image/jpeg";
+            imageCache[name] = (data, ct);
+        }
+        catch
+        {
+            return Results.NotFound();
+        }
+    }
+
+    var cached = imageCache[name];
+    return Results.File(cached.Data, cached.ContentType);
+});
+
 app.MapGet("/", () => Results.Content("""
 <!DOCTYPE html>
 <html>
@@ -30,28 +68,31 @@ const people = [
     { name: 'JEFF\nBEZOS', color: '#c45500', loaded: false, img: new Image() }
 ];
 
+let loadCount = 0;
 let started = false;
 function tryStart() {
     if (!started) { started = true; startAnimation(); }
 }
+function onImgLoad(idx) {
+    people[idx].loaded = true;
+    loadCount++;
+    if (loadCount === 3) tryStart();
+}
 
-people[0].img.crossOrigin = 'anonymous';
-people[0].img.onload = () => { people[0].loaded = true; tryStart(); };
+people[0].img.onload = () => onImgLoad(0);
 people[0].img.onerror = tryStart;
-people[0].img.src = 'https://pbs.twimg.com/profile_images/1221837516816306177/_Ld4un5A_400x400.jpg';
+people[0].img.src = '/img/satya';
 
-people[1].img.crossOrigin = 'anonymous';
-people[1].img.onload = () => { people[1].loaded = true; tryStart(); };
+people[1].img.onload = () => onImgLoad(1);
 people[1].img.onerror = tryStart;
-people[1].img.src = 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a8/Bill_Gates_2017_%28cropped%29.jpg/440px-Bill_Gates_2017_%28cropped%29.jpg';
+people[1].img.src = '/img/gates';
 
-people[2].img.crossOrigin = 'anonymous';
-people[2].img.onload = () => { people[2].loaded = true; tryStart(); };
+people[2].img.onload = () => onImgLoad(2);
 people[2].img.onerror = tryStart;
-people[2].img.src = 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6d/Jeff_Bezos_at_Amazon_Spheres_Grand_Opening_in_Seattle_-_2018_%2839074799225%29_%28cropped%29.jpg/440px-Jeff_Bezos_at_Amazon_Spheres_Grand_Opening_in_Seattle_-_2018_%2839074799225%29_%28cropped%29.jpg';
+people[2].img.src = '/img/bezos';
 
-// Start after 2s regardless
-setTimeout(tryStart, 2000);
+// Start after 3s regardless
+setTimeout(tryStart, 3000);
 
 function startAnimation() {
     ctx.fillStyle = '#008000';
