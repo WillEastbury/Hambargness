@@ -23,18 +23,35 @@ canvas.height = window.innerHeight;
 const cardW = 100;
 const cardH = 130;
 const cards = [];
-let imgLoaded = false;
 
-// Draw Satya onto an offscreen canvas as fallback-proof source
-const img = new Image();
-img.crossOrigin = 'anonymous';
-img.onload = () => { imgLoaded = true; startAnimation(); };
-img.onerror = () => {
-    // Fallback: draw a card with text if image fails
-    imgLoaded = false;
-    startAnimation();
-};
-img.src = 'https://pbs.twimg.com/profile_images/1221837516816306177/_Ld4un5A_400x400.jpg';
+const people = [
+    { name: 'SATYA\nNADELLA', color: '#1a6fb5', loaded: false, img: new Image() },
+    { name: 'BILL\nGATES', color: '#4a2d8a', loaded: false, img: new Image() },
+    { name: 'JEFF\nBEZOS', color: '#c45500', loaded: false, img: new Image() }
+];
+
+let started = false;
+function tryStart() {
+    if (!started) { started = true; startAnimation(); }
+}
+
+people[0].img.crossOrigin = 'anonymous';
+people[0].img.onload = () => { people[0].loaded = true; tryStart(); };
+people[0].img.onerror = tryStart;
+people[0].img.src = 'https://pbs.twimg.com/profile_images/1221837516816306177/_Ld4un5A_400x400.jpg';
+
+people[1].img.crossOrigin = 'anonymous';
+people[1].img.onload = () => { people[1].loaded = true; tryStart(); };
+people[1].img.onerror = tryStart;
+people[1].img.src = 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a8/Bill_Gates_2017_%28cropped%29.jpg/440px-Bill_Gates_2017_%28cropped%29.jpg';
+
+people[2].img.crossOrigin = 'anonymous';
+people[2].img.onload = () => { people[2].loaded = true; tryStart(); };
+people[2].img.onerror = tryStart;
+people[2].img.src = 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6d/Jeff_Bezos_at_Amazon_Spheres_Grand_Opening_in_Seattle_-_2018_%2839074799225%29_%28cropped%29.jpg/440px-Jeff_Bezos_at_Amazon_Spheres_Grand_Opening_in_Seattle_-_2018_%2839074799225%29_%28cropped%29.jpg';
+
+// Start after 2s regardless
+setTimeout(tryStart, 2000);
 
 function startAnimation() {
     ctx.fillStyle = '#008000';
@@ -50,18 +67,19 @@ function spawnCard() {
         vx: (Math.random() - 0.5) * 6,
         vy: Math.random() * 2 + 1,
         gravity: 0.15 + Math.random() * 0.1,
-        bounced: false
+        bounced: false,
+        person: Math.floor(Math.random() * 3)
     });
 }
 
-function drawCard(x, y) {
+function drawCard(x, y, personIdx) {
+    const p = people[personIdx];
     ctx.save();
     ctx.shadowColor = 'rgba(0,0,0,0.4)';
     ctx.shadowBlur = 6;
     ctx.shadowOffsetX = 3;
     ctx.shadowOffsetY = 3;
 
-    // White card border
     ctx.fillStyle = '#fff';
     ctx.beginPath();
     ctx.roundRect(x, y, cardW, cardH, 6);
@@ -71,16 +89,17 @@ function drawCard(x, y) {
     ctx.roundRect(x + 4, y + 4, cardW - 8, cardH - 8, 4);
     ctx.clip();
 
-    if (imgLoaded) {
-        ctx.drawImage(img, x + 4, y + 4, cardW - 8, cardH - 8);
+    if (p.loaded) {
+        ctx.drawImage(p.img, x + 4, y + 4, cardW - 8, cardH - 8);
     } else {
-        ctx.fillStyle = '#1a6fb5';
+        ctx.fillStyle = p.color;
         ctx.fillRect(x + 4, y + 4, cardW - 8, cardH - 8);
         ctx.fillStyle = '#fff';
         ctx.font = 'bold 11px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('SATYA', x + cardW/2, y + cardH/2 - 6);
-        ctx.fillText('NADELLA', x + cardW/2, y + cardH/2 + 10);
+        const lines = p.name.split('\n');
+        ctx.fillText(lines[0], x + cardW/2, y + cardH/2 - 6);
+        ctx.fillText(lines[1], x + cardW/2, y + cardH/2 + 10);
     }
 
     ctx.restore();
@@ -105,7 +124,7 @@ function update() {
         if (card.x < 0) { card.x = 0; card.vx = -card.vx * 0.8; }
         if (card.x + cardW > canvas.width) { card.x = canvas.width - cardW; card.vx = -card.vx * 0.8; }
 
-        drawCard(card.x, card.y);
+        drawCard(card.x, card.y, card.person);
     }
 
     // Remove cards that have settled
