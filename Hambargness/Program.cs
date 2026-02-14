@@ -20,13 +20,28 @@ const ctx = canvas.getContext('2d');
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
-const img = new Image();
-img.crossOrigin = 'anonymous';
-img.src = 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/78/MS-Exec-Nadella-Satya-2017-08-31-22_%28cropped%29.jpg/440px-MS-Exec-Nadella-Satya-2017-08-31-22_%28cropped%29.jpg';
-
 const cardW = 100;
 const cardH = 130;
 const cards = [];
+let imgLoaded = false;
+
+// Draw Satya onto an offscreen canvas as fallback-proof source
+const img = new Image();
+img.crossOrigin = 'anonymous';
+img.onload = () => { imgLoaded = true; startAnimation(); };
+img.onerror = () => {
+    // Fallback: draw a card with text if image fails
+    imgLoaded = false;
+    startAnimation();
+};
+img.src = 'https://pbs.twimg.com/profile_images/1221837516816306177/_Ld4un5A_400x400.jpg';
+
+function startAnimation() {
+    ctx.fillStyle = '#008000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    setInterval(spawnCard, 120);
+    update();
+}
 
 function spawnCard() {
     cards.push({
@@ -52,11 +67,21 @@ function drawCard(x, y) {
     ctx.roundRect(x, y, cardW, cardH, 6);
     ctx.fill();
 
-    // Draw Satya clipped into card
     ctx.beginPath();
     ctx.roundRect(x + 4, y + 4, cardW - 8, cardH - 8, 4);
     ctx.clip();
-    ctx.drawImage(img, x + 4, y + 4, cardW - 8, cardH - 8);
+
+    if (imgLoaded) {
+        ctx.drawImage(img, x + 4, y + 4, cardW - 8, cardH - 8);
+    } else {
+        ctx.fillStyle = '#1a6fb5';
+        ctx.fillRect(x + 4, y + 4, cardW - 8, cardH - 8);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('SATYA', x + cardW/2, y + cardH/2 - 6);
+        ctx.fillText('NADELLA', x + cardW/2, y + cardH/2 + 10);
+    }
 
     ctx.restore();
 }
@@ -92,16 +117,6 @@ function update() {
 
     requestAnimationFrame(update);
 }
-
-img.onload = () => {
-    // Fill background
-    ctx.fillStyle = '#008000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Spawn cards continuously
-    setInterval(spawnCard, 120);
-    update();
-};
 
 window.addEventListener('resize', () => {
     canvas.width = window.innerWidth;
