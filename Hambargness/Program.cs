@@ -561,6 +561,9 @@ body{background:#1a6d1a;font-family:'Segoe UI',system-ui,sans-serif;color:#fff;m
 <!-- OVERLAY -->
 <div class="overlay" id="overlay"><div class="overlay-box"><h2 id="ov-title"></h2><p id="ov-msg"></p><button class="btn btn-gold" id="ov-btn" onclick="handleOverlay()">Next Round</button></div></div>
 
+<!-- WIN ANIMATION CANVAS -->
+<canvas id="win-canvas" style="display:none;position:fixed;inset:0;z-index:200"></canvas>
+
 <script>
 let token = null, pollId = null, selected = new Set(), lastRound = 0, overlayShown = false;
 const API = '/benny/api';
@@ -745,9 +748,51 @@ async function discardSel(){
     await fetch(API+'/discard/'+encodeURIComponent(id),{method:'POST',headers:{'Authorization':'Bearer '+token}});
     selected.clear(); pollState();
 }
+
+// Solitaire win animation
+function startWinAnimation(){
+    const cv=document.getElementById('win-canvas');
+    cv.style.display='block';
+    cv.width=window.innerWidth; cv.height=window.innerHeight;
+    const cx=cv.getContext('2d');
+    cx.fillStyle='#008000'; cx.fillRect(0,0,cv.width,cv.height);
+    const suits=['♠','♥','♦','♣'], ranks=['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+    const cw=70,ch=100,aCards=[];
+    const intv=setInterval(()=>{
+        const r=ranks[Math.floor(Math.random()*13)], s=suits[Math.floor(Math.random()*4)];
+        const red=s==='♥'||s==='♦';
+        aCards.push({x:Math.random()*(cv.width-cw),y:-ch,vx:(Math.random()-0.5)*6,vy:Math.random()*2+1,g:0.15+Math.random()*0.1,b:false,r,s,red});
+    },100);
+    function draw(){
+        for(const c of aCards){
+            c.vy+=c.g; c.x+=c.vx; c.y+=c.vy;
+            if(c.y+ch>cv.height){c.y=cv.height-ch;c.vy=-c.vy*0.6;c.vx*=0.95;c.b=true;}
+            if(c.x<0){c.x=0;c.vx=-c.vx*0.8;} if(c.x+cw>cv.width){c.x=cv.width-cw;c.vx=-c.vx*0.8;}
+            cx.save(); cx.shadowColor='rgba(0,0,0,0.4)'; cx.shadowBlur=5; cx.shadowOffsetX=2; cx.shadowOffsetY=2;
+            cx.fillStyle='#fff'; cx.beginPath(); cx.roundRect(c.x,c.y,cw,ch,5); cx.fill(); cx.restore();
+            cx.fillStyle=c.red?'#cc0000':'#333'; cx.font='bold 20px sans-serif'; cx.textAlign='center';
+            cx.fillText(c.r,c.x+cw/2,c.y+ch/2-4); cx.font='18px sans-serif'; cx.fillText(c.s,c.x+cw/2,c.y+ch/2+18);
+        }
+        for(let i=aCards.length-1;i>=0;i--){if(aCards[i].b&&Math.abs(aCards[i].vy)<0.5&&aCards[i].y+ch>=cv.height-1)aCards.splice(i,1);}
+        requestAnimationFrame(draw);
+    }
+    draw();
+    // Add click-to-dismiss after 3 seconds
+    setTimeout(()=>{
+        cv.onclick=()=>{ clearInterval(intv); cv.style.display='none'; cv.onclick=null; };
+        // Show a hint
+        cx.save(); cx.fillStyle='rgba(0,0,0,0.5)'; cx.fillRect(cv.width/2-120,20,240,36); cx.fillStyle='#fff'; cx.font='16px sans-serif'; cx.textAlign='center'; cx.fillText('Click anywhere to dismiss',cv.width/2,44); cx.restore();
+    },3000);
+}
+
 async function handleOverlay(){
     const btn=document.getElementById('ov-btn');
-    if(btn.textContent==='Back to Lobby'){location.reload();return;}
+    if(btn.textContent==='Back to Lobby'){
+        startWinAnimation();
+        document.getElementById('overlay').classList.remove('show');
+        setTimeout(()=>location.reload(), 12000);
+        return;
+    }
     await fetch(API+'/nextround',{method:'POST',headers:{'Authorization':'Bearer '+token}});
     overlayShown=false; document.getElementById('overlay').classList.remove('show'); pollState();
 }
