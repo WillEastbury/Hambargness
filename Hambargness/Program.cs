@@ -311,7 +311,7 @@ bool BennyAuth(HttpContext ctx, out BennyPlayer? player, out BennyLobby? lobby)
 app.MapGet("/benny/api/lobbies", () =>
 {
     EnsureBennyLobby();
-    return Results.Ok(bennyLobbies.Select(l => new { l.Id, Players = l.Players.Select(p => p.Name).ToList(), l.Players.Count, Max = 6, l.Round, Started = l.Round > 0 }));
+    return Results.Ok(bennyLobbies.Select(l => new { l.Id, Players = l.Players.Select(p => p.Name).ToList(), l.Players.Count, Max = 6, l.Round, l.MaxRounds, Started = l.Round > 0 }));
 });
 
 // Join lobby
@@ -340,6 +340,17 @@ app.MapPost("/benny/api/start", (HttpContext ctx) =>
     return Results.Ok();
 });
 
+// Set max rounds (first player only, before game starts)
+app.MapPost("/benny/api/rounds/{count:int}", (HttpContext ctx, int count) =>
+{
+    if (!BennyAuth(ctx, out var p, out var lobby)) return Results.Unauthorized();
+    if (lobby!.Round > 0) return Results.BadRequest("Already started");
+    if (lobby.Players[0].Id != p!.Id) return Results.BadRequest("Only the first player can set rounds");
+    if (count < 1 || count > 13) return Results.BadRequest("1-13 rounds");
+    lobby.MaxRounds = count;
+    return Results.Ok();
+});
+
 // Get game state (polled by client)
 app.MapGet("/benny/api/state", (HttpContext ctx) =>
 {
@@ -348,7 +359,7 @@ app.MapGet("/benny/api/state", (HttpContext ctx) =>
     var me = player!;
     return Results.Ok(new
     {
-        lobby.Id, lobby.Round, BennyRank = lobby.BennyRankName,
+        lobby.Id, lobby.Round, lobby.MaxRounds, BennyRank = lobby.BennyRankName,
         CurrentTurn = lobby.CurrentTurnPlayerName,
         IsMyTurn = lobby.IsPlayerTurn(me.Id),
         Phase = lobby.GetPhaseForPlayer(me.Id),
@@ -425,7 +436,7 @@ app.MapPost("/benny/api/nextround", (HttpContext ctx) =>
 {
     if (!BennyAuth(ctx, out var p, out var lobby)) return Results.Unauthorized();
     if (!lobby!.RoundOver) return Results.BadRequest("Round not over");
-    lock (lobby.Lock) { if (lobby.Round < 13 && !lobby.GameOver) lobby.StartRound(); }
+    lock (lobby.Lock) { if (lobby.Round < lobby.MaxRounds && !lobby.GameOver) lobby.StartRound(); }
     return Results.Ok();
 });
 
@@ -521,6 +532,16 @@ body{background:#1a6d1a;font-family:'Segoe UI',system-ui,sans-serif;color:#fff;m
         <div class="waiting" id="waiting-area" style="display:none">
             <p>Waiting for players... <span id="wait-count"></span></p>
             <div class="player-chips" id="wait-players"></div>
+            <div style="margin:12px 0" id="rounds-picker">
+                <label style="font-size:13px;font-weight:600;margin-right:8px">Rounds:</label>
+                <select id="rounds-select" onchange="setRounds()" style="padding:6px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.3);background:rgba(255,255,255,0.1);color:#fff;font-size:14px;cursor:pointer">
+                    <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                    <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+                    <option value="7">7</option><option value="8">8</option><option value="9">9</option>
+                    <option value="10">10</option><option value="11">11</option><option value="12">12</option>
+                    <option value="13" selected>13</option>
+                </select>
+            </div>
             <button class="btn btn-gold" id="start-btn" onclick="startGame()" style="margin-top:12px" disabled>Start Game (2+ players)</button>
         </div>
     </div>
@@ -613,9 +634,17 @@ function pollWaiting(){
             document.getElementById('wait-count').textContent=`(${s.players.length} joined)`;
             document.getElementById('wait-players').innerHTML=s.players.map(p=>`<span class="chip">${p.name}</span>`).join('');
             document.getElementById('start-btn').disabled = s.players.length < 2;
+            // Only first player can set rounds
+            const isFirst = s.players.length > 0 && s.players[0].name === s.players.find((_,i)=>i===0)?.name;
+            document.getElementById('rounds-select').value = s.maxRounds;
             if(s.round > 0){ clearInterval(wid); enterGame(); }
         }catch{}
     }, 1500);
+}
+
+async function setRounds(){
+    const v=document.getElementById('rounds-select').value;
+    await fetch(API+'/rounds/'+v,{method:'POST',headers:{'Authorization':'Bearer '+token}});
 }
 
 async function startGame(){
@@ -648,7 +677,7 @@ function cardHtml(c, small){
 
 function renderState(s){
     // Top bar
-    document.getElementById('g-round').textContent=`Round ${s.round}/13`;
+    document.getElementById('g-round').textContent=`Round ${s.round}/${s.maxRounds}`;
     document.getElementById('g-benny').textContent=`Benny: ${s.bennyRank}`;
     document.getElementById('g-turn').textContent=s.isMyTurn?'Your Turn!':s.currentTurn+"'s turn";
     document.getElementById('g-turn').className=`badge ${s.isMyTurn?'badge-turn':''}`;
@@ -851,6 +880,7 @@ public class BennyLobby
     public string? RoundWinnerName { get; set; }
     public bool GameOver { get; set; } = false;
     public string? GameWinnerName { get; set; }
+    public int MaxRounds { get; set; } = 13;
     public List<string> Messages { get; } = new();
     public object Lock { get; } = new();
 
@@ -917,7 +947,7 @@ public class BennyLobby
             foreach (var p in Players) { var penalty = p.Hand.Sum(c => CardValue(c)); p.Score += penalty; }
             AddMessage($"Round {Round} over! {RoundWinnerName} went out.");
             foreach (var p in Players) AddMessage($"  {p.Name}: +{p.Hand.Sum(c => CardValue(c))} pts (total: {p.Score})");
-            if (Round >= 13)
+            if (Round >= MaxRounds)
             {
                 GameOver = true;
                 GameWinnerName = Players.OrderBy(p => p.Score).First().Name;
