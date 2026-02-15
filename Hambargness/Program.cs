@@ -363,8 +363,10 @@ app.MapGet("/benny/api/state", (HttpContext ctx) =>
         CurrentTurn = lobby.CurrentTurnPlayerName,
         IsMyTurn = lobby.IsPlayerTurn(me.Id),
         Phase = lobby.GetPhaseForPlayer(me.Id),
-        MyHand = me.Hand.Select(c => new { c.Rank, c.Suit, c.Id, IsBenny = c.Rank == lobby.BennyRank }).ToList(),
+        MyHand = me.Hand.Select(c => new { c.Rank, c.Suit, c.Id, IsBenny = c.Rank == lobby.BennyRank, IsNew = c.Id == me.LastDrawnCardId }).ToList(),
         MyMelds = me.Melds.Select(m => m.Select(c => new { c.Rank, c.Suit, c.Id, IsBenny = c.Rank == lobby.BennyRank }).ToList()).ToList(),
+        HasMelds = me.Melds.Count > 0,
+        AllMelds = lobby.Players.Select(pl => new { pl.Name, IsMe = pl.Id == me.Id, Melds = pl.Melds.Select((m, mi) => new { Index = mi, Cards = m.Select(c => new { c.Rank, c.Suit, c.Id, IsBenny = c.Rank == lobby.BennyRank }).ToList() }).ToList() }).ToList(),
         DiscardTop = lobby.DiscardPile.Count > 0 ? new { lobby.DiscardPile.Last().Rank, lobby.DiscardPile.Last().Suit, lobby.DiscardPile.Last().Id, IsBenny = lobby.DiscardPile.Last().Rank == lobby.BennyRank } : null,
         DeckCount = lobby.Deck.Count,
         Players = lobby.Players.Select(pl => new { pl.Name, HandCount = pl.Hand.Count, MeldCount = pl.Melds.Count, pl.Score, IsCurrentTurn = lobby.IsPlayerTurn(pl.Id) }).ToList(),
@@ -382,7 +384,7 @@ app.MapPost("/benny/api/draw/deck", (HttpContext ctx) =>
     if (!lobby!.IsPlayerTurn(player!.Id)) return Results.BadRequest("Not your turn");
     if (lobby.GetPhaseForPlayer(player.Id) != "draw") return Results.BadRequest("Already drew");
     if (lobby.Deck.Count == 0) return Results.BadRequest("Deck empty");
-    lock (lobby.Lock) { player.Hand.Add(lobby.Deck[0]); lobby.Deck.RemoveAt(0); player.HasDrawn = true; }
+    lock (lobby.Lock) { var c = lobby.Deck[0]; player.Hand.Add(c); lobby.Deck.RemoveAt(0); player.HasDrawn = true; player.LastDrawnCardId = c.Id; }
     lobby.AddMessage($"{player.Name} drew from deck");
     return Results.Ok();
 });
@@ -394,7 +396,7 @@ app.MapPost("/benny/api/draw/discard", (HttpContext ctx) =>
     if (!lobby!.IsPlayerTurn(player!.Id)) return Results.BadRequest("Not your turn");
     if (lobby.GetPhaseForPlayer(player.Id) != "draw") return Results.BadRequest("Already drew");
     if (lobby.DiscardPile.Count == 0) return Results.BadRequest("Discard empty");
-    lock (lobby.Lock) { var c = lobby.DiscardPile.Last(); lobby.DiscardPile.Remove(c); player.Hand.Add(c); player.HasDrawn = true; }
+    lock (lobby.Lock) { var c = lobby.DiscardPile.Last(); lobby.DiscardPile.Remove(c); player.Hand.Add(c); player.HasDrawn = true; player.LastDrawnCardId = c.Id; }
     lobby.AddMessage($"{player.Name} picked up discard");
     return Results.Ok();
 });
@@ -429,6 +431,30 @@ app.MapPost("/benny/api/discard/{cardId}", (HttpContext ctx, string cardId) =>
     if (player.Hand.Count == 0) { lobby.EndRound(player); }
     else { lobby.NextTurn(); }
     return Results.Ok();
+});
+
+// Lay off card(s) onto an existing meld (any player's)
+app.MapPost("/benny/api/layoff/{playerName}/{meldIndex:int}", async (HttpContext ctx, string playerName, int meldIndex) =>
+{
+    if (!BennyAuth(ctx, out var player, out var lobby)) return Results.Unauthorized();
+    if (!lobby!.IsPlayerTurn(player!.Id)) return Results.BadRequest("Not your turn");
+    if (lobby.GetPhaseForPlayer(player.Id) != "play") return Results.BadRequest("Draw first");
+    if (player.Melds.Count == 0) return Results.BadRequest("You must lay at least one meld first");
+    var targetPlayer = lobby.Players.FirstOrDefault(p => p.Name == playerName);
+    if (targetPlayer == null) return Results.BadRequest("Player not found");
+    if (meldIndex < 0 || meldIndex >= targetPlayer.Melds.Count) return Results.BadRequest("Invalid meld");
+    var body = await JsonSerializer.DeserializeAsync<string[]>(ctx.Request.Body);
+    if (body == null || body.Length == 0) return Results.BadRequest("No cards specified");
+    var cards = body.Select(id => player.Hand.FirstOrDefault(c => c.Id == id)).Where(c => c != null).ToList();
+    if (cards.Count != body.Length) return Results.BadRequest("Cards not in hand");
+    // Validate: meld + new cards must still be valid
+    var combined = new List<BennyCard>(targetPlayer.Melds[meldIndex]);
+    combined.AddRange(cards!);
+    if (!BennyLobby.IsValidMeld(combined, lobby.BennyRank)) return Results.BadRequest("Cards don't fit this meld");
+    lock (lobby.Lock) { targetPlayer.Melds[meldIndex] = combined; foreach (var c in cards!) player.Hand.Remove(c); }
+    lobby.AddMessage($"{player.Name} laid off {cards!.Count} card(s) onto {targetPlayer.Name}'s meld");
+    if (player.Hand.Count == 0) { lobby.EndRound(player); return Results.Ok(new { went_out = true }); }
+    return Results.Ok(new { went_out = false });
 });
 
 // Next round (after round over)
@@ -489,6 +515,16 @@ body{background:#1a6d1a;font-family:'Segoe UI',system-ui,sans-serif;color:#fff;m
 .card-back{background:linear-gradient(135deg,#1a3a8a,#2d5dc7);color:#fff;font-size:10px}
 .card.sel{border-color:#feca57;transform:translateY(-6px);box-shadow:0 6px 16px rgba(254,202,87,0.4)}
 .card.benny{box-shadow:0 0 10px 2px #feca57}
+.card.new-card{border-color:#48dbfb;box-shadow:0 0 12px 3px rgba(72,219,251,0.6);animation:pulse-new 1s ease infinite}
+@keyframes pulse-new{0%,100%{box-shadow:0 0 12px 3px rgba(72,219,251,0.6)}50%{box-shadow:0 0 18px 6px rgba(72,219,251,0.9)}}
+.card,.meld-group .card{transition:transform 0.3s ease,box-shadow 0.3s ease,opacity 0.3s ease}
+@keyframes card-enter{from{opacity:0;transform:translateY(-30px) scale(0.8)}to{opacity:1;transform:translateY(0) scale(1)}}
+.card-enter{animation:card-enter 0.35s ease-out}
+.meld-owner{font-size:10px;font-weight:600;opacity:0.7;margin-bottom:2px;text-align:center}
+.all-melds-zone{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;min-height:40px}
+.player-meld-block{display:flex;flex-direction:column;align-items:center;gap:2px}
+.meld-group.layoff-target{cursor:pointer;border:2px dashed rgba(254,202,87,0.5);border-radius:6px}
+.meld-group.layoff-target:hover{border-color:#feca57;background:rgba(254,202,87,0.1)}
 .card .r{font-size:18px;line-height:1}.card .s{font-size:16px}
 .card .tl{position:absolute;top:2px;left:4px;font-size:9px;line-height:1.1}.card .br{position:absolute;bottom:2px;right:4px;font-size:9px;line-height:1.1;transform:rotate(180deg)}
 .table-row{display:flex;gap:10px;align-items:center;justify-content:center}
@@ -570,9 +606,10 @@ body{background:#1a6d1a;font-family:'Segoe UI',system-ui,sans-serif;color:#fff;m
         <div class="actions">
             <button class="btn btn-gold btn-sm" id="btn-pickup" onclick="drawDiscard()" disabled>Pick Up</button>
             <button class="btn btn-gold btn-sm" id="btn-meld" onclick="layMeld()" disabled>Lay Meld</button>
+            <button class="btn btn-gold btn-sm" id="btn-layoff" onclick="toggleLayoff()" disabled style="background:#48dbfb;color:#333">Lay Off</button>
             <button class="btn btn-sm" style="background:#e74c3c;color:#fff" id="btn-discard" onclick="discardSel()" disabled>Discard</button>
         </div>
-        <div class="zone"><div class="zone-label">Your Melds</div><div class="meld-zone" id="my-melds"></div></div>
+        <div class="zone"><div class="zone-label">Melds on Table</div><div class="all-melds-zone" id="all-melds"></div></div>
         <div class="zone"><div class="zone-label">Your Hand (click to select)</div><div class="card-row" id="my-hand"></div></div>
         <div class="scoreboard"><h3>Scores</h3><table id="score-table"></table></div>
         <div class="log-box" id="log-box"></div>
@@ -586,7 +623,7 @@ body{background:#1a6d1a;font-family:'Segoe UI',system-ui,sans-serif;color:#fff;m
 <canvas id="win-canvas" style="display:none;position:fixed;inset:0;z-index:200"></canvas>
 
 <script>
-let token = null, pollId = null, selected = new Set(), lastRound = 0, overlayShown = false;
+let token = null, pollId = null, selected = new Set(), lastRound = 0, overlayShown = false, layoffMode = false, prevHandIds = new Set();
 const API = '/benny/api';
 
 function h(tag,cls,html){ const e=document.createElement(tag); if(cls)e.className=cls; if(html)e.innerHTML=html; return e; }
@@ -669,13 +706,14 @@ async function pollState(){
     }catch{}
 }
 
-function cardHtml(c, small){
-    const col=c.suit==='♥'||c.suit==='♦'?'card-r':'card-w';
-    const b=c.isBenny?'benny':'';
+function cardHtml(c){
     return `<span class="r">${c.rank}</span><span class="s">${c.suit}</span><span class="tl">${c.rank}<br>${c.suit}</span><span class="br">${c.rank}<br>${c.suit}</span>`;
 }
 
+let lastState = null;
+
 function renderState(s){
+    lastState = s;
     // Top bar
     document.getElementById('g-round').textContent=`Round ${s.round}/${s.maxRounds}`;
     document.getElementById('g-benny').textContent=`Benny: ${s.bennyRank}`;
@@ -687,7 +725,6 @@ function renderState(s){
     const oppEl = document.getElementById('opp-row');
     oppEl.innerHTML='';
     s.players.forEach(p=>{
-        if(s.myHand && p.name===s.players.find(x=>x.handCount===s.myHand.length)?.name && s.isMyTurn) {} // skip complex check
         const div=h('div',`opp-block ${p.isCurrentTurn?'active-turn':''}`);
         div.innerHTML=`<div class="opp-name">${p.name}</div><div class="opp-info">${p.handCount} cards | ${p.meldCount} melds | ${p.score} pts</div>`;
         oppEl.appendChild(div);
@@ -705,36 +742,60 @@ function renderState(s){
         dt.innerHTML=cardHtml(s.discardTop);
     } else { dt.className='pile-placeholder'; dt.innerHTML='Empty'; }
 
-    // My hand
+    // My hand — detect newly appeared cards for animation
+    const curIds = new Set((s.myHand||[]).map(c=>c.id));
     const mh=document.getElementById('my-hand');
     mh.innerHTML='';
     (s.myHand||[]).forEach((c,i)=>{
         const col=c.suit==='♥'||c.suit==='♦'?'card-r':'card-w';
         const sel=selected.has(c.id)?'sel':'';
         const b=c.isBenny?'benny':'';
-        const div=h('div',`card ${col} ${sel} ${b}`);
+        const isNew=c.isNew?'new-card':'';
+        const enter=!prevHandIds.has(c.id)?'card-enter':'';
+        const div=h('div',`card ${col} ${sel} ${b} ${isNew} ${enter}`);
         div.innerHTML=cardHtml(c);
         div.onclick=()=>{selected.has(c.id)?selected.delete(c.id):selected.add(c.id);renderState(s);};
         mh.appendChild(div);
     });
+    prevHandIds=curIds;
 
-    // My melds
-    const mm=document.getElementById('my-melds');
-    mm.innerHTML = (s.myMelds||[]).length ? s.myMelds.map(m=>'<div class="meld-group">'+m.map(c=>{
-        const col=c.suit==='♥'||c.suit==='♦'?'card-r':'card-w';
-        const b=c.isBenny?'benny':'';
-        return `<div class="card ${col} ${b}">${cardHtml(c)}</div>`;
-    }).join('')+'</div>').join('') : '<span style="opacity:0.3;font-size:11px">No melds</span>';
+    // All melds (all players)
+    const am=document.getElementById('all-melds');
+    const anyMelds = (s.allMelds||[]).some(p=>p.melds.length>0);
+    if(!anyMelds){ am.innerHTML='<span style="opacity:0.3;font-size:11px">No melds yet</span>'; }
+    else {
+        am.innerHTML='';
+        (s.allMelds||[]).forEach(pl=>{
+            if(pl.melds.length===0) return;
+            const block=h('div','player-meld-block');
+            block.innerHTML=`<div class="meld-owner">${pl.isMe?'You':pl.name}</div>`;
+            pl.melds.forEach(m=>{
+                const canLayoff = layoffMode && s.phase==='play' && s.hasMelds && selected.size>0;
+                const mg=h('div',`meld-group ${canLayoff?'layoff-target':''}`);
+                mg.innerHTML=m.cards.map(c=>{
+                    const col=c.suit==='♥'||c.suit==='♦'?'card-r':'card-w';
+                    const b=c.isBenny?'benny':'';
+                    return `<div class="card ${col} ${b}">${cardHtml(c)}</div>`;
+                }).join('');
+                if(canLayoff) mg.onclick=()=>doLayoff(pl.name, m.index);
+                block.appendChild(mg);
+            });
+            am.appendChild(block);
+        });
+    }
 
     // Buttons
     document.getElementById('btn-pickup').disabled = s.phase!=='draw'||!s.discardTop;
     document.getElementById('btn-meld').disabled = s.phase!=='play'||selected.size<3;
+    document.getElementById('btn-layoff').disabled = s.phase!=='play'||!s.hasMelds||selected.size===0||!anyMelds;
     document.getElementById('btn-discard').disabled = s.phase!=='play'||selected.size!==1;
     document.getElementById('draw-deck').style.cursor = s.phase==='draw'?'pointer':'default';
     document.getElementById('draw-deck').onclick = s.phase==='draw'?drawDeck:null;
+    document.getElementById('btn-layoff').textContent = layoffMode?'Cancel Lay Off':'Lay Off';
 
     // Message
-    document.getElementById('msg').textContent = s.isMyTurn?(s.phase==='draw'?'Draw a card from deck or pick up discard.':'Select cards to meld, or select one to discard.'):s.currentTurn+"'s turn — waiting...";
+    if(layoffMode) document.getElementById('msg').textContent='Click a meld to lay off your selected card(s) onto it.';
+    else document.getElementById('msg').textContent = s.isMyTurn?(s.phase==='draw'?'Draw a card from deck or pick up discard.':'Select cards to meld, lay off, or select one to discard.'):s.currentTurn+"'s turn — waiting...";
 
     // Scores
     const st=document.getElementById('score-table');
@@ -754,28 +815,38 @@ function renderState(s){
         document.getElementById('ov-btn').textContent=s.gameOver?'Back to Lobby':'Next Round';
         document.getElementById('overlay').classList.add('show');
     }
-    if(!s.roundOver && lastRound>0 && s.round>lastRound){ overlayShown=false; document.getElementById('overlay').classList.remove('show'); }
+    if(!s.roundOver && lastRound>0 && s.round>lastRound){ overlayShown=false; document.getElementById('overlay').classList.remove('show'); layoffMode=false; }
     lastRound=s.round;
 }
 
 async function drawDeck(){
     await fetch(API+'/draw/deck',{method:'POST',headers:{'Authorization':'Bearer '+token}});
-    selected.clear(); pollState();
+    selected.clear(); layoffMode=false; pollState();
 }
 async function drawDiscard(){
     await fetch(API+'/draw/discard',{method:'POST',headers:{'Authorization':'Bearer '+token}});
-    selected.clear(); pollState();
+    selected.clear(); layoffMode=false; pollState();
 }
 async function layMeld(){
     const ids=[...selected];
     const r=await fetch(API+'/meld',{method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(ids)});
     if(!r.ok){alert(await r.text());return;}
-    selected.clear(); pollState();
+    selected.clear(); layoffMode=false; pollState();
+}
+function toggleLayoff(){
+    layoffMode=!layoffMode;
+    if(lastState) renderState(lastState);
+}
+async function doLayoff(playerName, meldIdx){
+    const ids=[...selected];
+    const r=await fetch(API+'/layoff/'+encodeURIComponent(playerName)+'/'+meldIdx,{method:'POST',headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(ids)});
+    if(!r.ok){alert(await r.text());return;}
+    selected.clear(); layoffMode=false; pollState();
 }
 async function discardSel(){
     const id=[...selected][0];
     await fetch(API+'/discard/'+encodeURIComponent(id),{method:'POST',headers:{'Authorization':'Bearer '+token}});
-    selected.clear(); pollState();
+    selected.clear(); layoffMode=false; pollState();
 }
 
 // Solitaire win animation
@@ -849,6 +920,7 @@ public class BennyPlayer
     public List<List<BennyCard>> Melds { get; set; } = new();
     public int Score { get; set; } = 0;
     public bool HasDrawn { get; set; } = false;
+    public string? LastDrawnCardId { get; set; }
 
     public BennyPlayer(string name) { Name = name; }
 
@@ -900,7 +972,7 @@ public class BennyLobby
         DiscardPile.Clear();
         RoundOver = false;
         RoundWinnerName = null;
-        foreach (var p in Players) { p.Hand.Clear(); p.Melds.Clear(); p.HasDrawn = false; }
+        foreach (var p in Players) { p.Hand.Clear(); p.Melds.Clear(); p.HasDrawn = false; p.LastDrawnCardId = null; }
         for (int i = 0; i < 7; i++) foreach (var p in Players) { p.Hand.Add(Deck[0]); Deck.RemoveAt(0); }
         DiscardPile.Add(Deck[0]); Deck.RemoveAt(0);
         TurnIndex = (Round - 1) % Players.Count;
@@ -913,6 +985,7 @@ public class BennyLobby
         lock (Lock)
         {
             Players[TurnIndex].HasDrawn = false;
+            Players[TurnIndex].LastDrawnCardId = null;
             TurnIndex = (TurnIndex + 1) % Players.Count;
             TurnStart = DateTime.UtcNow;
             if (Deck.Count == 0 && DiscardPile.Count <= 1) { EndRound(null); }
