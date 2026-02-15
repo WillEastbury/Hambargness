@@ -6,7 +6,11 @@ var imageUrls = new Dictionary<string, string>
 {
     ["satya"] = "https://pbs.twimg.com/profile_images/1221837516816306177/_Ld4un5A_400x400.jpg",
     ["gates"] = "https://upload.wikimedia.org/wikipedia/commons/a/a8/Bill_Gates_2017_%28cropped%29.jpg",
-    ["bezos"] = "https://upload.wikimedia.org/wikipedia/commons/0/03/Jeff_Bezos_visits_LAAFB_SMC_%283908618%29_%28cropped%29.jpeg"
+    ["bezos"] = "https://upload.wikimedia.org/wikipedia/commons/0/03/Jeff_Bezos_visits_LAAFB_SMC_%283908618%29_%28cropped%29.jpeg",
+    ["jobs"] = "https://upload.wikimedia.org/wikipedia/commons/d/dc/Steve_Jobs_Headshot_2010-CROP_%28cropped_2%29.jpg",
+    ["ballmer"] = "https://upload.wikimedia.org/wikipedia/commons/5/54/Steve_ballmer_2007_outdoors2-2.jpg",
+    ["ellison"] = "https://upload.wikimedia.org/wikipedia/commons/0/00/Larry_Ellison_picture.png",
+    ["musk"] = "https://upload.wikimedia.org/wikipedia/commons/5/5e/Elon_Musk_-_54820081119_%28cropped%29.jpg"
 };
 
 var httpClient = new HttpClient();
@@ -65,7 +69,11 @@ const cards = [];
 const people = [
     { name: 'SATYA\nNADELLA', color: '#1a6fb5', loaded: false, img: new Image() },
     { name: 'BILL\nGATES', color: '#4a2d8a', loaded: false, img: new Image() },
-    { name: 'JEFF\nBEZOS', color: '#c45500', loaded: false, img: new Image() }
+    { name: 'JEFF\nBEZOS', color: '#c45500', loaded: false, img: new Image() },
+    { name: 'STEVE\nJOBS', color: '#333333', loaded: false, img: new Image() },
+    { name: 'STEVE\nBALLMER', color: '#d42020', loaded: false, img: new Image() },
+    { name: 'LARRY\nELLISON', color: '#cc0000', loaded: false, img: new Image() },
+    { name: 'ELON\nMUSK', color: '#1a1a2e', loaded: false, img: new Image() }
 ];
 
 let loadCount = 0;
@@ -76,20 +84,15 @@ function tryStart() {
 function onImgLoad(idx) {
     people[idx].loaded = true;
     loadCount++;
-    if (loadCount === 3) tryStart();
+    if (loadCount === people.length) tryStart();
 }
 
-people[0].img.onload = () => onImgLoad(0);
-people[0].img.onerror = tryStart;
-people[0].img.src = '/img/satya';
-
-people[1].img.onload = () => onImgLoad(1);
-people[1].img.onerror = tryStart;
-people[1].img.src = '/img/gates';
-
-people[2].img.onload = () => onImgLoad(2);
-people[2].img.onerror = tryStart;
-people[2].img.src = '/img/bezos';
+const imgKeys = ['satya','gates','bezos','jobs','ballmer','ellison','musk'];
+imgKeys.forEach((key, i) => {
+    people[i].img.onload = () => onImgLoad(i);
+    people[i].img.onerror = () => { loadCount++; if (loadCount === people.length) tryStart(); };
+    people[i].img.src = '/img/' + key;
+});
 
 // Start after 3s regardless
 setTimeout(tryStart, 3000);
@@ -109,7 +112,7 @@ function spawnCard() {
         vy: Math.random() * 2 + 1,
         gravity: 0.15 + Math.random() * 0.1,
         bounced: false,
-        person: Math.floor(Math.random() * 3)
+        person: Math.floor(Math.random() * people.length)
     });
 }
 
