@@ -64,8 +64,16 @@ app.MapGet("/", () => Results.Content("""
             box-shadow: 0 8px 32px rgba(0,0,0,0.3); min-width: 340px; max-width: 420px; border: 1px solid var(--panel-border);
             transition: background 0.3s, color 0.3s, border-color 0.3s;
         }
-        .panel h1 { font-size: 28px; margin-bottom: 4px; text-align: center; }
-        .panel .sub { font-size: 13px; opacity: 0.6; text-align: center; margin-bottom: 20px; }
+        .title-box {
+            background: linear-gradient(135deg, #ff6b6b, #feca57, #48dbfb, #ff9ff3, #54a0ff, #5f27cd);
+            background-size: 300% 300%;
+            animation: gradient-shift 4s ease infinite;
+            border-radius: 12px; padding: 20px 24px; margin-bottom: 16px; text-align: center;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+        }
+        @keyframes gradient-shift { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
+        .title-box h1 { font-size: 38px; color: #fff; text-shadow: 2px 2px 6px rgba(0,0,0,0.4); margin: 0; letter-spacing: 2px; }
+        .title-box .sub { font-size: 14px; color: rgba(255,255,255,0.85); margin: 4px 0 0; text-shadow: 1px 1px 3px rgba(0,0,0,0.3); }
         .section-label { font-weight: 600; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.5; margin-bottom: 10px; }
         .theme-row { display: flex; gap: 8px; margin-bottom: 24px; }
         .theme-btn {
@@ -96,8 +104,10 @@ app.MapGet("/", () => Results.Content("""
 <body>
 <div id="settings">
     <div class="panel">
+        <div class="title-box">
         <h1>&#127183; Hambargness</h1>
-        <p class="sub">Solitaire Win Screen — Pick Your Cards</p>
+        <p class="sub">Solitaire Win Screen &mdash; Pick Your Cards</p>
+    </div>
 
         <div class="section-label">Theme</div>
         <div class="theme-row">
